@@ -1,0 +1,39 @@
+# pip install PySide6
+
+import sys
+from PySide6.QtWidgets import (
+    QApplication, QWidget, QPushButton, QMessageBox, QVBoxLayout
+)
+from PySide6.QtCore import Qt
+
+
+def say_hello(parent=None):
+    QMessageBox.information(parent, "訊息", "哈囉，這是 PySide6！")
+
+
+def main():
+    app = QApplication(sys.argv)
+
+    # 建立主視窗
+    window = QWidget()
+    window.setWindowTitle("PySide6 範例")
+    window.resize(300, 200)
+
+    # 建立按鈕
+    button = QPushButton("點我")
+    button.clicked.connect(lambda: say_hello(window))
+
+    # 版面配置（等同 pack + pady 的效果）
+    layout = QVBoxLayout()
+    layout.addStretch()
+    layout.addWidget(button, alignment=Qt.AlignHCenter)
+    layout.addStretch()
+    window.setLayout(layout)
+
+    # 顯示視窗並啟動事件迴圈
+    window.show()
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()
