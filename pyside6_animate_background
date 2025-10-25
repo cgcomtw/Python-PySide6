@@ -1,0 +1,144 @@
+# pyside6_animate_background.py
+import sys
+from pathlib import Path
+
+from PySide6.QtCore import Qt, QSize
+from PySide6.QtGui import QPainter, QPixmap, QFont, QColor, QGuiApplication
+from PySide6.QtWidgets import QApplication, QMainWindow, QWidget
+
+
+class CoverBackgroundWidget(QWidget):
+    def __init__(self, png_path: Path | None, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_OpaquePaintEvent, True)
+        self.setAutoFillBackground(False)
+        self._pixmap: QPixmap | None = None
+        if png_path and png_path.is_file():
+            pm = QPixmap(str(png_path))
+            if not pm.isNull():
+                self._pixmap = pm
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor(0, 0, 0))
+
+        if not self._pixmap or self._pixmap.isNull():
+            painter.setPen(Qt.white)
+            painter.setFont(QFont("Segoe UI", 14))
+            painter.drawText(
+                self.rect(), Qt.AlignCenter,
+                "pictures/ 資料夾未找到 PNG\n或圖片載入失敗"
+            )
+            return
+
+        w = max(1, self.width())
+        h = max(1, self.height())
+
+        # 「滿版 Cover」縮放
+        scaled = self._pixmap.scaled(
+            QSize(w, h),
+            Qt.KeepAspectRatioByExpanding,
+            Qt.SmoothTransformation
+        )
+
+        x = (w - scaled.width()) // 2
+        y = (h - scaled.height()) // 2
+        painter.drawPixmap(x, y, scaled)
+
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self._is_fullscreen = False
+        self._saved_flags = self.windowFlags()
+        self._saved_geometry = None
+
+        # 視窗設定
+        self.resize(500, 888)
+        self.setMinimumSize(320, 480)
+        self.setWindowTitle("PySide6 Cover Background")
+        self._apply_dark_bg()
+
+        # 載入 pictures/ 第一張 PNG
+        png_path = self._find_first_png()
+        self.view = CoverBackgroundWidget(png_path)
+        self.setCentralWidget(self.view)
+
+    def _apply_dark_bg(self):
+        pal = self.palette()
+        pal.setColor(self.backgroundRole(), Qt.black)
+        pal.setColor(self.foregroundRole(), Qt.white)
+        self.setPalette(pal)
+
+    def _find_first_png(self) -> Path | None:
+        base = Path(__file__).resolve().parent
+        pics = base / "pictures"
+        if not pics.exists():
+            return None
+        candidates = sorted(
+            [p for p in pics.iterdir() if p.is_file() and p.suffix.lower() == ".png"]
+        )
+        return candidates[0] if candidates else None
+
+    # --- 全螢幕切換（F11） ---
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_F11:
+            self.toggle_fullscreen()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def toggle_fullscreen(self):
+        if not self._is_fullscreen:
+            self._is_fullscreen = True
+            self._enter_borderless_fullscreen()
+        else:
+            self._is_fullscreen = False
+            self._leave_borderless_fullscreen()
+
+    def _enter_borderless_fullscreen(self):
+        # 記下現在的 flags 與幾何 (方便回復)
+        self._saved_flags = self.windowFlags()
+        self._saved_geometry = self.geometry()
+
+        # 設為無邊框並進入全螢幕
+        self.setWindowFlag(Qt.FramelessWindowHint, True)
+        self.showFullScreen()
+
+    def _leave_borderless_fullscreen(self):
+        # 先退出全螢幕狀態
+        self.setWindowState(Qt.WindowNoState)
+
+        # **關鍵**：確實移除 Frameless，再還原原本 flags
+        self.setWindowFlag(Qt.FramelessWindowHint, False)
+        # 確保是正常的 Window 類型（有標題列）
+        self.setWindowFlags((self._saved_flags | Qt.Window) & ~Qt.FramelessWindowHint)
+
+        # 某些平台需要完整的 hide/show 流程來刷新標題列
+        self.hide()
+        self.showNormal()
+        self.show()
+
+        # 回復原視窗幾何（可選）
+        if self._saved_geometry is not None:
+            self.setGeometry(self._saved_geometry)
+
+        # 把視窗帶到最前面並取得焦點
+        self.activateWindow()
+        self.raise_()
+
+
+def main():
+    # 高 DPI 支援（需在 QApplication 建立前設定）
+    QGuiApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+    QGuiApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+
+    app = QApplication(sys.argv)
+    win = MainWindow()
+    win.show()
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()
+
