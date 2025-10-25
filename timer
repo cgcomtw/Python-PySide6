@@ -1,0 +1,167 @@
+# pyside6_timer.py
+
+# - 預設視窗 888x500、可縮放、黑色背景
+# - F11 切換全螢幕（隱藏標題列）/ 再按回視窗
+# - 螢幕中央白色文字顯示計時：時：分：秒：毫秒
+# - 初始停止；空白鍵：開始/暫停/再開
+# - 快速連按兩下空白鍵（預設 300ms 內）→ 歸零並停止
+
+import sys
+from PySide6.QtCore import Qt, QTimer, QTime, QElapsedTimer
+from PySide6.QtGui import QFont
+from PySide6.QtWidgets import QApplication, QLabel, QWidget, QVBoxLayout
+
+
+class TimerWindow(QWidget):
+    DOUBLE_TAP_MS = 300  # 兩次空白鍵判定為「快速連按」的時間門檻（毫秒）
+
+    def __init__(self):
+        super().__init__()
+
+        # --- 視窗設定 ---
+        self.setWindowTitle("PySide6 計時器")
+        self.resize(888, 500)  # 預設大小
+        # 黑色背景 + 文字置中白色
+        self.setStyleSheet("background-color: black;")
+
+        # --- 介面元件 ---
+        self.label = QLabel("00：00：00：000", self)
+        self.label.setAlignment(Qt.AlignCenter)
+        font = QFont("Consolas, Courier New, Noto Sans Mono", 64, QFont.Bold)
+        self.label.setFont(font)
+        self.label.setStyleSheet("color: white;")
+
+        layout = QVBoxLayout()
+        layout.addWidget(self.label)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.setLayout(layout)
+
+        # --- 計時狀態 ---
+        self.running = False
+        self.accumulated_ms = 0  # 先前累積毫秒（暫停時保留）
+        self._start_elapsed_ms = 0  # 本次開始的起點（使用 QElapsedTimer 參考值）
+        self.steady = QElapsedTimer()
+        self.steady.start()
+
+        # 用於偵測空白鍵雙擊
+        self._last_space_press_ms = -1
+
+        # --- 更新計時器 ---
+        self.timer = QTimer(self)
+        self.timer.setInterval(10)  # 每 10ms 更新顯示
+        self.timer.timeout.connect(self._on_tick)
+
+        # 顯示初始值
+        self._update_text(0)
+
+    # 每次畫面更新
+    def _on_tick(self):
+        if self.running:
+            now_ms = self.steady.elapsed()
+            current = self.accumulated_ms + (now_ms - self._start_elapsed_ms)
+            self._update_text(current)
+        else:
+            self._update_text(self.accumulated_ms)
+
+    # 將毫秒數格式化為「時：分：秒：毫秒」
+    def _update_text(self, total_ms: int):
+        if total_ms < 0:
+            total_ms = 0
+        ms = total_ms % 1000
+        total_sec = total_ms // 1000
+        s = total_sec % 60
+        total_min = total_sec // 60
+        m = total_min % 60
+        h = total_min // 60
+        # 使用全形冒號「：」，時以兩位數顯示（超過 99 照樣顯示）
+        text = f"{h:02d}：{m:02d}：{s:02d}：{ms:03d}"
+        self.label.setText(text)
+
+    # 開始或繼續
+    def start(self):
+        if not self.running:
+            self.running = True
+            self._start_elapsed_ms = self.steady.elapsed()
+            if not self.timer.isActive():
+                self.timer.start()
+
+    # 暫停
+    def pause(self):
+        if self.running:
+            now_ms = self.steady.elapsed()
+            self.accumulated_ms += (now_ms - self._start_elapsed_ms)
+            self.running = False
+            # 保持顯示更新（若想停止更新也可關掉 timer，但這裡保持 10ms 更新無妨）
+            # self.timer.stop()
+
+    # 歸零並停止
+    def reset(self):
+        self.running = False
+        self.accumulated_ms = 0
+        # 即時更新顯示
+        self._update_text(0)
+
+    # F11：全螢幕切換
+    def toggle_fullscreen(self):
+        if self.isFullScreen():
+            # 回到一般視窗
+            self.showNormal()
+        else:
+            # 進入全螢幕；Qt 的 showFullScreen 會隱藏標題列
+            self.showFullScreen()
+
+    # 鍵盤事件
+    def keyPressEvent(self, event):
+        # 避免自動重複觸發（按住鍵不放）
+        if event.isAutoRepeat():
+            return
+
+        key = event.key()
+
+        if key == Qt.Key_F11:
+            self.toggle_fullscreen()
+            return
+
+        if key == Qt.Key_Space:
+            now_ms = self.steady.elapsed()
+            # 檢查是否快速連按兩下空白鍵
+            if self._last_space_press_ms >= 0 and (now_ms - self._last_space_press_ms) <= self.DOUBLE_TAP_MS:
+                # 快速雙擊：歸零並停止
+                self.reset()
+                # 重置記錄，避免連續判定
+                self._last_space_press_ms = -1
+            else:
+                # 單次：切換開始/暫停
+                if self.running:
+                    self.pause()
+                else:
+                    self.start()
+                self._last_space_press_ms = now_ms
+            return
+
+        # 其餘按鍵交給父類別處理
+        super().keyPressEvent(event)
+
+    # 視窗大小調整，保持字型在合理範圍自適應（可選）
+    def resizeEvent(self, event):
+        # 依視窗高度調整字體大小（讓畫面中央字體隨視窗縮放）
+        h = self.height()
+        # 取高度的 18% 當字體大小，限制最小/最大
+        point_size = max(24, min(160, int(h * 0.18)))
+        f = self.label.font()
+        f.setPointSize(point_size)
+        self.label.setFont(f)
+        super().resizeEvent(event)
+
+
+def main():
+    app = QApplication(sys.argv)
+    # 在某些平台，預設就允許縮放，這裡不特別限制。背景色使用 widget 的樣式表即可。
+    w = TimerWindow()
+    w.show()
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()
+
